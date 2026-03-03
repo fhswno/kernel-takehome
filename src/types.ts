@@ -171,3 +171,10 @@ export interface ClassificationItem {
   department: string;
 }
 
+// -- QUERY --
+
+export type QueryResult =
+  | EmployeeCountResult
+  | HiringDepartmentsResult
+  | DepartmentHeadcountResult;
+  
