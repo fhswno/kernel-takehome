@@ -164,3 +164,10 @@ export interface RawDataStore {
   companies: Map<string, RawCompanyData>;
   companyNameIndex: Map<string, string>;
 }
+
+// -- CLASSIFICATION -- 
+export interface ClassificationItem {
+  index: number;
+  department: string;
+}
+
