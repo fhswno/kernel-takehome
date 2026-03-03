@@ -3,14 +3,14 @@
 import express, { Request, Response, NextFunction } from "express";
 
 // CONFIG
-import { config } from "../config";
+import { config } from "./config";
 
 // SERVICES
-import { loadRawData } from "../services/dataLoader";
-import { classifyDepartments } from "../services/llm";
+import { loadRawData } from "./services/dataLoader";
+import { classifyDepartments } from "./services/llm";
 
 // ROUTER
-import { createQueryRouter } from "../routes/query";
+import { createQueryRouter } from "./routes/query";
 
 // TYPES
 import {
@@ -21,7 +21,7 @@ import {
   QueryError,
   ErrorCode,
   QueryErrorResponse,
-} from "../types";
+} from "./types";
 
 //* Used to enrich raw data by classifying job titles into departments and building a structured data store. 
 const buildDataStore = async (): Promise<DataStore> => {
