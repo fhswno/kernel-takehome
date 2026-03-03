@@ -22,7 +22,7 @@ const openai = new OpenAI({ apiKey: config.openaiApiKey });
 const DEPARTMENT_LIST = DEPARTMENTS.join(", ");
 
 // CONSTANT - BATCH SIZE
-const CLASSIFICATION_BATCH_SIZE = 50;
+const CLASSIFICATION_BATCH_SIZE = 100;
 
 //* Used to classify a batch of job titles into departments. The LLM is prompted with a list of titles and must respond with a JSON array mapping each title to exactly one department.
 const buildClassificationPrompt = (titles: string[]): string => {
@@ -72,60 +72,73 @@ const parseClassificationResponse = (
   return result;
 };
 
-//* Used to classify a list of job titles into departments, using the LLM in batches to handle large lists while respecting token limits. Returns a mapping of title to department.
+//* Used to classify a list of job titles into departments, using the LLM in batches to handle large lists while respecting token limits. Returns a mapping of title to department. Parrelizes classification requests for batch efficiency.
 export const classifyDepartments = async (
   titles: string[]
 ): Promise<Map<string, Department>> => {
-  // Deduplicate Titles
   const uniqueTitles = [...new Set(titles)];
   const titleToDepartment = new Map<string, Department>();
 
+  const totalBatches = Math.ceil(uniqueTitles.length / CLASSIFICATION_BATCH_SIZE);
   console.log(
-    `Classifying ${uniqueTitles.length} unique titles (from ${titles.length} total)...`
+    `Classifying ${uniqueTitles.length} unique titles (from ${titles.length} total) in ${totalBatches} batches...`
   );
 
-  // Batch Processing
+  const batches: string[][] = [];
   for (let i = 0; i < uniqueTitles.length; i += CLASSIFICATION_BATCH_SIZE) {
-    const batch = uniqueTitles.slice(i, i + CLASSIFICATION_BATCH_SIZE);
-    const batchNumber = Math.floor(i / CLASSIFICATION_BATCH_SIZE) + 1;
-    const totalBatches = Math.ceil(
-      uniqueTitles.length / CLASSIFICATION_BATCH_SIZE
+    batches.push(uniqueTitles.slice(i, i + CLASSIFICATION_BATCH_SIZE));
+  }
+
+  const CONCURRENCY = 3;
+
+  for (let i = 0; i < batches.length; i += CONCURRENCY) {
+    const chunk = batches.slice(i, i + CONCURRENCY);
+    const startIdx = i;
+
+    console.log(
+      `  Processing batches ${startIdx + 1}-${Math.min(startIdx + chunk.length, batches.length)}/${totalBatches}...`
     );
 
-    console.log(`  Batch ${batchNumber}/${totalBatches} (${batch.length} titles)...`);
+    const results = await Promise.allSettled(
+      chunk.map(async (batch) => {
+        const response = await openai.chat.completions.create({
+          model: config.llmModel,
+          temperature: 0,
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are a precise classifier. You map job titles to departments. Respond only with valid JSON.",
+            },
+            {
+              role: "user",
+              content: buildClassificationPrompt(batch),
+            },
+          ],
+        });
 
-    try {
-      const response = await openai.chat.completions.create({
-        model: config.llmModel,
-        temperature: 0,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are a precise classifier. You map job titles to departments. Respond only with valid JSON.",
-          },
-          {
-            role: "user",
-            content: buildClassificationPrompt(batch),
-          },
-        ],
-      });
+        const content = response.choices[0]?.message?.content;
+        if (!content) throw new Error("Empty response from LLM");
 
-      const content = response.choices[0]?.message?.content;
-      if (!content) {
-        throw new Error("Empty response from LLM");
-      }
+        return { batch, classifications: parseClassificationResponse(content, batch.length) };
+      })
+    );
 
-      const classifications = parseClassificationResponse(content, batch.length);
-
-      for (let j = 0; j < batch.length; j++) {
-        const department = classifications.get(j) ?? "Other";
-        titleToDepartment.set(batch[j], department);
-      }
-    } catch (error) {
-      console.error(`  Batch ${batchNumber} failed, defaulting to "Other":`, error);
-      for (const title of batch) {
-        titleToDepartment.set(title, "Other");
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        const { batch, classifications } = result.value;
+        for (let j = 0; j < batch.length; j++) {
+          titleToDepartment.set(batch[j], classifications.get(j) ?? "Other");
+        }
+      } else {
+        console.error("  Batch failed, defaulting to Other:", result.reason);
+        const failedBatchIdx = results.indexOf(result);
+        const failedBatch = chunk[failedBatchIdx];
+        if (failedBatch) {
+          for (const title of failedBatch) {
+            titleToDepartment.set(title, "Other");
+          }
+        }
       }
     }
   }
