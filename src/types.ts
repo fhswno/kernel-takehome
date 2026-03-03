@@ -147,3 +147,20 @@ export interface QueryErrorResponse {
     message: string;
   };
 }
+
+// -- RAW DATA - PRE-CLASSIFICATION --
+
+export type RawPerson = Omit<Person, "department">;
+
+export type RawJobPosting = Omit<JobPosting, "department">;
+
+export interface RawCompanyData {
+  account: Account;
+  people: RawPerson[];
+  jobs: RawJobPosting[];
+}
+
+export interface RawDataStore {
+  companies: Map<string, RawCompanyData>;
+  companyNameIndex: Map<string, string>;
+}
